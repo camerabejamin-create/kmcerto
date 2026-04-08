@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.kmcertonative'
+version = '0.8.0'
+
+android {
+  namespace "expo.modules.kmcertonative"
+
+  defaultConfig {
+    versionCode 1
+    versionName "0.8.0"
+  }
+
+  lint {
+    abortOnError false
+  }
+}

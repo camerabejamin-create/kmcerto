@@ -1,0 +1,13 @@
+{
+  "name": "kmcerto-native",
+  "version": "1.0.0",
+  "description": "KmCerto native module for overlay and accessibility services",
+  "main": "index.ts",
+  "types": "index.ts",
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}
