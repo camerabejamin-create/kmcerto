@@ -1,18 +1,20 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { MetricCard } from "@/src/components/metric-card";
 import { PermissionRow } from "@/src/components/permission-row";
 import {
+  clearLog,
   getPermissionStatus,
   isMonitoringActive,
   openAccessibilitySettings,
   openBatteryOptimizationSettings,
   openNotificationListenerSettings,
   openOverlaySettings,
+  readLog,
   startMonitoring,
   subscribeToOverlayUpdates,
   type KmCertoOverlayPayload,
@@ -31,6 +33,9 @@ export default function HomeScreen() {
   const [monitoringActive, setMonitoringActive] = useState(false);
   const [minimumPerKm, setMinimumPerKm] = useState(1.5);
   const [lastOverlay, setLastOverlay] = useState<KmCertoOverlayPayload | null>(null);
+  const [logVisible, setLogVisible] = useState(false);
+  const [logContent, setLogContent] = useState("");
+  const [logLoading, setLogLoading] = useState(false);
   const appState = useRef(AppState.currentState);
 
   const refreshStatus = useCallback(async () => {
@@ -76,6 +81,43 @@ export default function HomeScreen() {
       return () => subscription.remove();
     }, [refreshStatus]),
   );
+
+  const handleOpenLog = useCallback(async () => {
+    setLogLoading(true);
+    setLogVisible(true);
+    try {
+      const content = await readLog();
+      setLogContent(content);
+    } catch {
+      setLogContent("Erro ao carregar logs");
+    } finally {
+      setLogLoading(false);
+    }
+  }, []);
+
+  const handleClearLog = useCallback(async () => {
+    Alert.alert("Limpar logs", "Deseja apagar todo o histórico de logs?", [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Limpar", style: "destructive", onPress: async () => {
+          await clearLog();
+          setLogContent("Log limpo com sucesso.");
+        }
+      },
+    ]);
+  }, []);
+
+  const handleRefreshLog = useCallback(async () => {
+    setLogLoading(true);
+    try {
+      const content = await readLog();
+      setLogContent(content);
+    } catch {
+      setLogContent("Erro ao carregar logs");
+    } finally {
+      setLogLoading(false);
+    }
+  }, []);
 
   const automaticModeAvailable = useMemo(() => Platform.OS === "android", []);
   const allPermissionsGranted = overlayGranted && accessibilityGranted;
@@ -192,6 +234,12 @@ export default function HomeScreen() {
           <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push("/settings")}>
             <Text style={styles.secondaryButtonText}>Abrir configurações</Text>
           </TouchableOpacity>
+
+          {/* Botão de Logs */}
+          <TouchableOpacity style={styles.logButton} onPress={handleOpenLog}>
+            <Text style={styles.logButtonText}>Ver logs de debug</Text>
+          </TouchableOpacity>
+
           {!automaticModeAvailable ? <Text style={styles.platformWarning}>O monitoramento automático funciona apenas no Android.</Text> : null}
         </View>
 
@@ -231,6 +279,41 @@ export default function HomeScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Modal de Logs */}
+      <Modal visible={logVisible} animationType="slide" onRequestClose={() => setLogVisible(false)}>
+        <View style={styles.logModal}>
+          <View style={styles.logHeader}>
+            <Text style={styles.logHeaderTitle}>Logs de Debug</Text>
+            <TouchableOpacity onPress={() => setLogVisible(false)}>
+              <Text style={styles.logCloseButton}>Fechar</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.logActions}>
+            <TouchableOpacity style={styles.logActionButton} onPress={handleRefreshLog}>
+              <Text style={styles.logActionText}>Atualizar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.logActionButton, styles.logActionDanger]} onPress={handleClearLog}>
+              <Text style={[styles.logActionText, styles.logActionDangerText]}>Limpar logs</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.logInfo}>
+            <Text style={styles.logInfoText}>
+              Os logs mostram tudo que o KmCerto detecta: eventos de acessibilidade, notificações, Resource IDs encontrados, textos lidos, e resultados do parser. Use para diagnosticar problemas na leitura de corridas.
+            </Text>
+          </View>
+          {logLoading ? (
+            <View style={styles.logLoadingContainer}>
+              <ActivityIndicator color="#F5D400" size="large" />
+              <Text style={styles.logLoadingText}>Carregando logs...</Text>
+            </View>
+          ) : (
+            <ScrollView style={styles.logScrollView} contentContainerStyle={styles.logScrollContent}>
+              <Text style={styles.logText} selectable>{logContent || "Nenhum log disponível ainda."}</Text>
+            </ScrollView>
+          )}
+        </View>
+      </Modal>
     </ScreenContainer>
   );
 }
@@ -255,21 +338,41 @@ const styles = StyleSheet.create({
   warningButtonText: { color: "#F5D400", fontSize: 16, fontWeight: "bold" },
   secondaryButton: { backgroundColor: "#1D2026", padding: 16, borderRadius: 16, alignItems: "center", borderWidth: 1, borderColor: "#2D313A" },
   secondaryButtonText: { color: "white", fontSize: 16, fontWeight: "600" },
-  platformWarning: { color: "#9CA3AF", fontSize: 12, textAlign: "center", marginTop: 8 },
-  lastResultCard: { backgroundColor: "#1D2026", borderRadius: 24, padding: 20, gap: 16, borderWidth: 1, borderColor: "#2D313A" },
+  logButton: { backgroundColor: "#1a1a2e", padding: 16, borderRadius: 16, alignItems: "center", borderWidth: 1, borderColor: "#4A90D9" },
+  logButtonText: { color: "#4A90D9", fontSize: 16, fontWeight: "600" },
+  platformWarning: { color: "#6B7280", fontSize: 12, textAlign: "center", marginTop: 4 },
+  lastResultCard: { backgroundColor: "#1D2026", borderRadius: 20, padding: 16, gap: 12, borderWidth: 1, borderColor: "#2D313A" },
   lastResultHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  lastResultLabel: { color: "#9CA3AF", fontSize: 14, fontWeight: "600" },
-  statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10 },
-  acceptBadge: { backgroundColor: "rgba(22, 163, 74, 0.2)" },
-  rejectBadge: { backgroundColor: "rgba(220, 38, 38, 0.2)" },
+  lastResultLabel: { color: "#9CA3AF", fontSize: 13, fontWeight: "600" },
+  statusBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999 },
+  acceptBadge: { backgroundColor: "rgba(22, 163, 74, 0.15)" },
+  rejectBadge: { backgroundColor: "rgba(220, 38, 38, 0.15)" },
   statusBadgeText: { fontSize: 12, fontWeight: "bold", color: "white" },
-  lastFare: { color: "white", fontSize: 36, fontWeight: "bold" },
-  emptyState: { backgroundColor: "#1D2026", borderRadius: 24, padding: 30, alignItems: "center", borderStyle: "dashed", borderWidth: 1, borderColor: "#2D313A" },
+  lastFare: { color: "white", fontSize: 28, fontWeight: "bold" },
+  emptyState: { backgroundColor: "#1D2026", borderRadius: 20, padding: 24, alignItems: "center", borderWidth: 1, borderColor: "#2D313A" },
   emptyStateText: { color: "#6B7280", fontSize: 14, textAlign: "center", lineHeight: 20 },
-  footerCard: { backgroundColor: "rgba(245, 212, 0, 0.05)", borderRadius: 24, padding: 20, gap: 8, borderWidth: 1, borderColor: "rgba(245, 212, 0, 0.1)", marginBottom: 20 },
-  footerTitle: { color: "#F5D400", fontSize: 14, fontWeight: "bold" },
+  footerCard: { backgroundColor: "#1D2026", borderRadius: 20, padding: 16, gap: 8, borderWidth: 1, borderColor: "#2D313A" },
+  footerTitle: { color: "white", fontSize: 14, fontWeight: "bold" },
   footerText: { color: "#9CA3AF", fontSize: 13, lineHeight: 20 },
-  footerStrong: { color: "white", fontWeight: "bold" },
+  footerStrong: { fontWeight: "bold", color: "white" },
   acceptText: { color: "#16A34A" },
   rejectText: { color: "#DC2626" },
+
+  // Estilos do Modal de Logs
+  logModal: { flex: 1, backgroundColor: "#101114" },
+  logHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, paddingTop: 50, borderBottomWidth: 1, borderBottomColor: "#2D313A" },
+  logHeaderTitle: { color: "white", fontSize: 18, fontWeight: "bold" },
+  logCloseButton: { color: "#F5D400", fontSize: 16, fontWeight: "600" },
+  logActions: { flexDirection: "row", gap: 12, padding: 16, paddingBottom: 8 },
+  logActionButton: { flex: 1, backgroundColor: "#1D2026", padding: 12, borderRadius: 12, alignItems: "center", borderWidth: 1, borderColor: "#2D313A" },
+  logActionDanger: { borderColor: "#DC2626" },
+  logActionText: { color: "white", fontSize: 14, fontWeight: "600" },
+  logActionDangerText: { color: "#DC2626" },
+  logInfo: { paddingHorizontal: 16, paddingBottom: 8 },
+  logInfoText: { color: "#6B7280", fontSize: 12, lineHeight: 18 },
+  logLoadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
+  logLoadingText: { color: "#9CA3AF", fontSize: 14 },
+  logScrollView: { flex: 1, margin: 16, backgroundColor: "#0a0a0a", borderRadius: 12, borderWidth: 1, borderColor: "#2D313A" },
+  logScrollContent: { padding: 12 },
+  logText: { color: "#00FF88", fontSize: 11, fontFamily: Platform.OS === "android" ? "monospace" : "Menlo", lineHeight: 16 },
 });
