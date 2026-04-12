@@ -15,6 +15,8 @@ const withKmCertoManifest = (config) => {
       "android.permission.WAKE_LOCK",
       "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
       "android.permission.RECEIVE_BOOT_COMPLETED",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.READ_EXTERNAL_STORAGE",
     ];
 
     if (!androidManifest["uses-permission"]) androidManifest["uses-permission"] = [];
@@ -33,7 +35,7 @@ const withKmCertoManifest = (config) => {
       mainApplication.service = [];
     }
 
-    // 1. NotificationListenerService — lê notificações da 99 e Uber
+    // 1. NotificationListenerService — lê notificações da 99, Uber e iFood
     mainApplication.service.push({
       $: {
         "android:name": "expo.modules.kmcertonative.KmCertoNotificationService",
@@ -54,7 +56,7 @@ const withKmCertoManifest = (config) => {
       property: [{ $: { "android:name": "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE", "android:value": "overlay" } }],
     });
 
-    // 3. Accessibility Service
+    // 3. Accessibility Service — configuração completa
     mainApplication.service.push({
       $: {
         "android:name": "expo.modules.kmcertonative.KmCertoAccessibilityService",
@@ -78,10 +80,13 @@ const withKmCertoResources = (config) => {
     const xmlDir = path.join(resDir, "xml");
     if (!fs.existsSync(xmlDir)) fs.mkdirSync(xmlDir, { recursive: true });
 
+    // CORREÇÃO CRÍTICA: NÃO filtrar por packageNames na configuração XML
+    // Isso permite que o serviço receba eventos de TODOS os apps
+    // A filtragem é feita no código Kotlin para maior flexibilidade
     fs.writeFileSync(path.join(xmlDir, "kmcerto_accessibility_service_config.xml"),
       `<?xml version="1.0" encoding="utf-8"?>
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged"
+    android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged|typeNotificationStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
@@ -94,7 +99,7 @@ const withKmCertoResources = (config) => {
     fs.writeFileSync(path.join(valuesDir, "kmcerto_strings.xml"),
       `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="kmcerto_accessibility_description">O KmCerto lê as ofertas de corridas automaticamente para calcular o valor por km.</string>
+    <string name="kmcerto_accessibility_description">O KmCerto lê as ofertas de corridas e entregas automaticamente para calcular o valor por km. Monitora iFood, 99, Uber, inDrive e Lalamove.</string>
 </resources>`
     );
 
