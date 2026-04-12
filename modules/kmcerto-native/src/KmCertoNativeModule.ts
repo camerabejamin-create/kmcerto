@@ -29,6 +29,7 @@ const KmCertoNativeModule = {
   getMinimumPerKm: (): Promise<number> => { try { return NativeModule?.getMinimumPerKm() ?? Promise.resolve(1.5); } catch { return Promise.resolve(1.5); } },
   getLogPath: (): Promise<string> => { try { return NativeModule?.getLogPath() ?? Promise.resolve("N/A"); } catch { return Promise.resolve("N/A"); } },
   clearLog: (): Promise<boolean> => { try { return NativeModule?.clearLog() ?? Promise.resolve(false); } catch { return Promise.resolve(false); } },
+  readLog: (): Promise<string> => { try { return NativeModule?.readLog() ?? Promise.resolve(""); } catch { return Promise.resolve(""); } },
   showTestOverlay: (payload: string): Promise<boolean> => { try { return NativeModule?.showTestOverlay(payload) ?? Promise.resolve(false); } catch { return Promise.resolve(false); } },
   addListener: (event: "KmCertoOverlayData", listener: (payload: KmCertoOverlayEventPayload) => void): EventSubscription => {
     if (!emitter) return { remove: () => {} } as EventSubscription;
