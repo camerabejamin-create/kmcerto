@@ -263,16 +263,16 @@ data class OfferDecisionData(
         OfferDecisionData(
           totalFare = p.optDouble("totalFare", Double.NaN),
           totalFareLabel = p.optString("totalFareLabel", ""),
-          status = p.optString("status", "RECUSAR"),
-          statusColor = p.optString("statusColor", "#DC2626"),
+          status = p.optString("status", "REJEITAR"),
+          statusColor = p.optString("statusColor", "#FF0000"),
           perKm = p.optDouble("perKm", 0.0),
-          perHour = if (p.has("perHour") && !p.isNull("perHour")) p.optDouble("perHour") else null,
-          perMinute = if (p.has("perMinute") && !p.isNull("perMinute")) p.optDouble("perMinute") else null,
-          minimumPerKm = p.optDouble("minimumPerKm", KmCertoRuntime.DEFAULT_MIN_KM),
-          sourceApp = p.optString("sourceApp", "KmCerto"),
+          perHour = if (p.has("perHour")) p.optDouble("perHour") else null,
+          perMinute = if (p.has("perMinute")) p.optDouble("perMinute") else null,
+          minimumPerKm = p.optDouble("minimumPerKm", 1.5),
+          sourceApp = p.optString("sourceApp", "Desconhecido"),
           rawText = p.optString("rawText", ""),
-          distanceKm = if (p.has("distanceKm") && !p.isNull("distanceKm")) p.optDouble("distanceKm") else null,
-          totalMinutes = if (p.has("totalMinutes") && !p.isNull("totalMinutes")) p.optDouble("totalMinutes") else null,
+          distanceKm = if (p.has("distanceKm")) p.optDouble("distanceKm") else null,
+          totalMinutes = if (p.has("totalMinutes")) p.optDouble("totalMinutes") else null
         )
       } catch (_: Throwable) { null }
     }
@@ -280,225 +280,51 @@ data class OfferDecisionData(
 }
 
 // ─────────────────────────────────────────────
-// PARSER — Extração de valor, distância e tempo
-// ─────────────────────────────────────────────
-object KmCertoOfferParser {
-  private val locale = Locale("pt", "BR")
-
-  // Regex para capturar valores monetários: "R$ 15,50", "R$15.50", "15,50" (sem R$)
-  private val currencyRx = Regex("""R\$\s*([0-9]{1,4}(?:[.][0-9]{3})*(?:,[0-9]{1,2})|[0-9]+(?:[.,][0-9]{1,2})?)""")
-  // Fallback: número com vírgula que parece valor monetário (ex: "15,50" sem R$)
-  private val numericValueRx = Regex("""(?<!\d)(\d{1,4},\d{2})(?!\d)""")
-
-  // Regex para distância
-  private val kmRx = Regex("""(\d{1,3}(?:[.,]\d{1,2})?)\s?km\b""", RegexOption.IGNORE_CASE)
-  private val quilometroRx = Regex("""(\d{1,3}(?:[.,]\d{1,2})?)\s?(?:quilômetro|quilometro)s?\b""", RegexOption.IGNORE_CASE)
-  private val totalKmRx = Regex("""(?:dist[âa]ncia\s+(?:total)?|viagem\s+de\s+\d+\s+minutos)\s*\(?\s*(\d{1,3}(?:[.,]\d{1,2})?)\s?km""", RegexOption.IGNORE_CASE)
-
-  // Regex para tempo
-  private val minRx = Regex("""(\d{1,3})\s?min(?:uto)?s?\b""", RegexOption.IGNORE_CASE)
-  private val totalMinRx = Regex("""(?:viagem\s+de|tempo|total:?)\s+(\d{1,3})\s?min""", RegexOption.IGNORE_CASE)
-
-  // Palavras-chave que indicam uma oferta de corrida
-  private val offerKeywords = listOf(
-    "aceitar", "recusar", "corrida", "viagem", "entrega", "pedido",
-    "passageiro", "retirada", "destino", "embarque", "desembarque",
-    "ganho", "ganhos", "envios", "envios moto", "envios carro",
-    "verificado", "total:", "rota", "coleta", "delivery",
-    "nova entrega", "novo pedido", "disponível", "solicitação",
-  )
-
-  fun parse(rawText: String, minimumPerKm: Double, sourcePackage: String): OfferDecisionData? {
-    val text = rawText.replace("\n", " ").replace(Regex("\\s+"), " ").trim()
-    if (text.isBlank()) return null
-
-    val textLower = text.lowercase(locale)
-
-    // Verificar se o texto parece ser uma oferta de corrida
-    val hasMoneySign = textLower.contains("r$") || numericValueRx.containsMatchIn(textLower)
-    val hasKm = textLower.contains("km") || quilometroRx.containsMatchIn(textLower)
-    val hasOfferKeyword = offerKeywords.any { textLower.contains(it) }
-
-    // Precisa ter pelo menos indicação de valor E (distância OU palavra-chave de oferta)
-    if (!hasMoneySign) return null
-    if (!hasKm && !hasOfferKeyword) return null
-
-    // Extrair valor da corrida
-    val fare = extractFare(text) ?: return null
-
-    // Extrair distância
-    val distance = extractDistance(text)
-
-    // Extrair tempo
-    val minutes = extractMinutes(text)
-
-    if (fare <= 0) return null
-
-    // Se não encontrou distância, tentar calcular apenas com valor
-    // (útil para notificações que só mostram valor)
-    if (distance == null || distance <= 0) {
-      // Se temos pelo menos o valor e alguma indicação de oferta, mostrar sem R$/km
-      if (hasOfferKeyword || textLower.contains("r$")) {
-        KmCertoLogger.log("PARSE_SEM_DIST valor=$fare texto=$text")
-        return null // Sem distância não conseguimos calcular R$/km
-      }
-      return null
-    }
-
-    val perKm = fare / distance
-    val perMin = if (minutes != null && minutes > 0) fare / minutes else null
-    val perHour = if (minutes != null && minutes > 0) fare / (minutes / 60.0) else null
-    val accept = perKm + 0.0001 >= minimumPerKm
-
-    return OfferDecisionData(
-      totalFare = fare,
-      totalFareLabel = NumberFormat.getCurrencyInstance(locale).format(fare),
-      status = if (accept) "ACEITAR" else "RECUSAR",
-      statusColor = if (accept) "#16A34A" else "#DC2626",
-      perKm = r2(perKm), perHour = perHour?.let(::r2), perMinute = perMin?.let(::r2),
-      minimumPerKm = r2(minimumPerKm),
-      sourceApp = KmCertoRuntime.sourceLabel(sourcePackage),
-      rawText = text, distanceKm = r2(distance),
-      totalMinutes = minutes?.let(::r2),
-    )
-  }
-
-  private fun extractFare(text: String): Double? {
-    // Primeiro tenta com R$
-    currencyRx.find(text)?.groupValues?.getOrNull(1)?.let(::ptBr)?.let {
-      if (it.isFinite() && it > 0) return it
-    }
-    // Fallback: número que parece valor (XX,XX)
-    numericValueRx.findAll(text).mapNotNull { it.groupValues.getOrNull(1)?.let(::ptBr) }
-      .filter { it.isFinite() && it in 1.0..9999.0 }
-      .firstOrNull()?.let { return it }
-    return null
-  }
-
-  private fun extractDistance(text: String): Double? {
-    // Primeiro tenta padrão "distância total" ou "viagem de X minutos (Y km)"
-    totalKmRx.find(text)?.groupValues?.getOrNull(1)?.let(::ptBr)?.let {
-      if (it.isFinite() && it in 0.1..500.0) return it
-    }
-    // Depois tenta "quilômetros"
-    quilometroRx.find(text)?.groupValues?.getOrNull(1)?.let(::ptBr)?.let {
-      if (it.isFinite() && it in 0.1..500.0) return it
-    }
-    // Depois tenta "km" simples — pega a MAIOR distância (geralmente a distância total)
-    val kmMatches = kmRx.findAll(text).mapNotNull { it.groupValues.getOrNull(1)?.let(::ptBr) }
-      .filter { it.isFinite() && it in 0.1..500.0 }.toList()
-    if (kmMatches.isNotEmpty()) {
-      // Se tem múltiplos valores, soma os dois primeiros (pickup + dropoff)
-      // ou pega o maior se faz mais sentido
-      return if (kmMatches.size == 1) kmMatches[0]
-      else kmMatches.take(2).sum().takeIf { it in 0.1..500.0 } ?: kmMatches.maxOrNull()
-    }
-    return null
-  }
-
-  private fun extractMinutes(text: String): Double? {
-    totalMinRx.find(text)?.groupValues?.getOrNull(1)?.toDoubleOrNull()?.let {
-      if (it in 1.0..360.0) return it
-    }
-    val minMatches = minRx.findAll(text).mapNotNull { it.groupValues.getOrNull(1)?.toDoubleOrNull() }.toList()
-    if (minMatches.isEmpty()) return null
-    if (minMatches.size == 1) return minMatches[0]
-    return minMatches.take(2).sum().takeIf { it in 1.0..360.0 }
-  }
-
-  fun fromJsonPayload(payload: String?, minimumPerKm: Double): OfferDecisionData? {
-    if (payload.isNullOrBlank()) return null
-    return try {
-      val j = JSONObject(payload)
-      val fare = j.optDouble("totalFare", Double.NaN)
-      val perKm = j.optDouble("perKm", Double.NaN)
-      if (!fare.isFinite() || !perKm.isFinite()) return null
-      OfferDecisionData(
-        totalFare = fare,
-        totalFareLabel = j.optString("totalFareLabel", NumberFormat.getCurrencyInstance(locale).format(fare)),
-        status = j.optString("status", if (perKm >= minimumPerKm) "ACEITAR" else "RECUSAR"),
-        statusColor = j.optString("statusColor", if (perKm >= minimumPerKm) "#16A34A" else "#DC2626"),
-        perKm = r2(perKm),
-        perHour = if (j.has("perHour") && !j.isNull("perHour")) r2(j.optDouble("perHour")) else null,
-        perMinute = if (j.has("perMinute") && !j.isNull("perMinute")) r2(j.optDouble("perMinute")) else null,
-        minimumPerKm = j.optDouble("minimumPerKm", minimumPerKm),
-        sourceApp = j.optString("sourceApp", "Teste"), rawText = j.optString("rawText", ""),
-      )
-    } catch (_: Throwable) { null }
-  }
-
-  private fun ptBr(s: String): Double {
-    val cleaned = s.trim().replace(".", "").replace(',', '.')
-    return cleaned.toDoubleOrNull() ?: Double.NaN
-  }
-  private fun r2(v: Double) = kotlin.math.round(v * 100.0) / 100.0
-}
-
-// ─────────────────────────────────────────────
-// ACCESSIBILITY SERVICE — Leitura da UI Tree
-// Correções aplicadas:
-// 1. Prioriza event.source sobre rootInActiveWindow
-// 2. Inclui TYPE_APPLICATION nas janelas escaneadas
-// 3. findPackageInTree() para overlays com packageName nulo
-// 4. Debounce reduzido (2500ms) com distância na assinatura
-// 5. Regex expandido para variações de formato
-// 6. Emissão de evento para React Native
+// ACESSIBILIDADE — Captura de dados da tela
 // ─────────────────────────────────────────────
 class KmCertoAccessibilityService : AccessibilityService() {
-  private var wakeLock: PowerManager.WakeLock? = null
-  private var lastSignature: String? = null
+  private var lastSignature = ""
   private var lastEmissionAt = 0L
+  private var wakeLock: PowerManager.WakeLock? = null
 
   companion object {
-    // Referência estática para emitir eventos para o React Native
-    var moduleInstance: KmCertoNativeModule? = null
-
     fun isEnabled(ctx: Context): Boolean {
-      val enabled = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-      val expected = "${ctx.packageName}/${KmCertoAccessibilityService::class.java.name}"
-      return TextUtils.SimpleStringSplitter(':').run { setString(enabled); any { it.equals(expected, ignoreCase = true) } }
+      val flat = Settings.Secure.getString(ctx.contentResolver, "enabled_accessibility_services") ?: return false
+      return flat.contains(ComponentName(ctx, KmCertoAccessibilityService::class.java).flattenToString())
     }
   }
 
   override fun onServiceConnected() {
     super.onServiceConnected()
     KmCertoLogger.init(this)
-    KmCertoLogger.log("═══════════════════════════════════════")
     KmCertoLogger.log("ACESSIBILIDADE: Serviço conectado")
-    KmCertoLogger.log("Packages monitorados: ${KmCertoRuntime.supportedPackages.keys.joinToString(", ")}")
-    KmCertoLogger.log("═══════════════════════════════════════")
-
+    
     val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
     wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KmCerto:WakeLock")
-    wakeLock?.acquire(10 * 60 * 1000L)
 
     serviceInfo = AccessibilityServiceInfo().apply {
       eventTypes = AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
-        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
-        AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
+                   AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                   AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED
       feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
       flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-        AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
-        AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-      notificationTimeout = 50
-      // NÃO filtrar por packageNames — monitorar TODOS e filtrar no código
-      // Isso permite detectar overlays de apps que usam processos secundários
-      packageNames = null
+              AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+              AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+      notificationTimeout = 100
     }
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-    if (event == null) return
-    if (!KmCertoRuntime.isMonitoringEnabled(this)) return
+    if (event == null || !KmCertoRuntime.isMonitoringEnabled(this)) return
 
     val eventPkg = event.packageName?.toString() ?: ""
-    val eventType = event.eventType
-
-    // Log resumido do evento (apenas para apps suportados ou eventos sem package)
     val isSupported = KmCertoRuntime.supportsPackage(eventPkg)
-    val isUnknownPkg = eventPkg.isBlank() || eventPkg == "null"
+    val isUnknownPkg = eventPkg.isBlank() || eventPkg == "null" || eventPkg == "android" || eventPkg == "com.android.systemui"
 
     if (!isSupported && !isUnknownPkg) return
+
+    val eventType = event.eventType
+    if (eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) return
 
     val eventTypeName = when (eventType) {
       AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> "CONTENT_CHANGED"
@@ -569,53 +395,56 @@ class KmCertoAccessibilityService : AccessibilityService() {
     for (window in allWindows) {
       val windowType = window.type
       // Incluir TYPE_APPLICATION (1), TYPE_SYSTEM (3), TYPE_ACCESSIBILITY_OVERLAY (4)
-      if (windowType != AccessibilityWindowInfo.TYPE_APPLICATION &&
-        windowType != AccessibilityWindowInfo.TYPE_SYSTEM &&
-        windowType != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
+      if (windowType == AccessibilityWindowInfo.TYPE_APPLICATION ||
+          windowType == AccessibilityWindowInfo.TYPE_SYSTEM ||
+          windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) {
 
-      val root = try { window.root } catch (_: Throwable) { null } ?: continue
-      val windowPkg = root.packageName?.toString() ?: ""
+        val root = try { window.root } catch (_: Throwable) { null } ?: continue
+        val windowPkg = root.packageName?.toString() ?: ""
 
-      // Determinar o package real
-      val detectedPkg = if (KmCertoRuntime.supportsPackage(windowPkg)) {
-        windowPkg
-      } else if (windowPkg.isBlank() || windowPkg == "null") {
-        findPackageInTree(root) ?: run { try { root.recycle() } catch (_: Throwable) {}; continue }
-      } else {
+        // Determinar o package real
+        val detectedPkg = if (KmCertoRuntime.supportsPackage(windowPkg)) {
+          windowPkg
+        } else if (windowPkg.isBlank() || windowPkg == "null") {
+          findPackageInTree(root) ?: run { try { root.recycle() } catch (_: Throwable) {}; null }
+        } else {
+          try { root.recycle() } catch (_: Throwable) {}
+          null
+        }
+
+        if (detectedPkg != null) {
+          val text = collectText(root)
+          val ids = mutableSetOf<String>()
+          collectIds(root, ids)
+
+          if (ids.isNotEmpty()) {
+            KmCertoLogger.log("WIN[$detectedPkg type=$windowType] IDs: ${ids.take(20).joinToString(" | ")}")
+          }
+
+          if (text.isNotBlank()) {
+            KmCertoLogger.log("WIN[$detectedPkg type=$windowType] texto(${text.length}): ${text.take(300)}")
+
+            // Tentar busca direta por Resource ID
+            val directResult = tryDirectIdSearchOnNode(root, detectedPkg)
+            if (directResult != null) {
+              KmCertoLogger.log("WIN_ID_OK ${directResult.totalFareLabel} | ${directResult.distanceKm}km | ${directResult.status}")
+              emitIfNew(directResult, detectedPkg)
+              try { root.recycle() } catch (_: Throwable) {}
+              return
+            }
+
+            // Fallback: parse por texto
+            val parsed = KmCertoOfferParser.parse(text, KmCertoRuntime.getMinimumPerKm(this), detectedPkg)
+            if (parsed != null) {
+              KmCertoLogger.log("WIN_PARSE_OK ${parsed.totalFareLabel} | ${parsed.distanceKm}km | ${parsed.status}")
+              emitIfNew(parsed, detectedPkg)
+              try { root.recycle() } catch (_: Throwable) {}
+              return
+            }
+          }
+        }
         try { root.recycle() } catch (_: Throwable) {}
-        continue
       }
-
-      val text = collectText(root)
-      val ids = mutableSetOf<String>()
-      collectIds(root, ids)
-
-      if (ids.isNotEmpty()) {
-        KmCertoLogger.log("WIN[$detectedPkg type=$windowType] IDs: ${ids.take(20).joinToString(" | ")}")
-      }
-
-      if (text.isNotBlank()) {
-        KmCertoLogger.log("WIN[$detectedPkg type=$windowType] texto(${text.length}): ${text.take(300)}")
-
-        // Tentar busca direta por Resource ID
-        val directResult = tryDirectIdSearchOnNode(root, detectedPkg)
-        if (directResult != null) {
-          KmCertoLogger.log("WIN_ID_OK ${directResult.totalFareLabel} | ${directResult.distanceKm}km | ${directResult.status}")
-          emitIfNew(directResult, detectedPkg)
-          try { root.recycle() } catch (_: Throwable) {}
-          return
-        }
-
-        // Fallback: parse por texto
-        val parsed = KmCertoOfferParser.parse(text, KmCertoRuntime.getMinimumPerKm(this), detectedPkg)
-        if (parsed != null) {
-          KmCertoLogger.log("WIN_PARSE_OK ${parsed.totalFareLabel} | ${parsed.distanceKm}km | ${parsed.status}")
-          emitIfNew(parsed, detectedPkg)
-          try { root.recycle() } catch (_: Throwable) {}
-          return
-        }
-      }
-      try { root.recycle() } catch (_: Throwable) {}
     }
 
     // ── ETAPA 3: Fallback com rootInActiveWindow ──
