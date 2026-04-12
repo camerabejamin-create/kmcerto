@@ -18,10 +18,20 @@ export type KmCertoOverlayPayload = {
 };
 
 function norm(p: KmCertoOverlayEventPayload | KmCertoOverlayPayload): KmCertoOverlayPayload {
-  return { totalFare: p.totalFare, totalFareLabel: p.totalFareLabel, status: p.status, statusColor: p.statusColor,
-    perKm: p.perKm, perHour: p.perHour ?? null, perMinute: p.perMinute ?? null,
-    totalDistance: p.totalDistance ?? undefined, totalMinutes: p.totalMinutes ?? null,
-    minimumPerKm: p.minimumPerKm, sourceApp: p.sourceApp, rawText: p.rawText };
+  return {
+    totalFare: p.totalFare,
+    totalFareLabel: p.totalFareLabel,
+    status: p.status,
+    statusColor: p.statusColor,
+    perKm: p.perKm,
+    perHour: p.perHour ?? null,
+    perMinute: p.perMinute ?? null,
+    totalDistance: p.totalDistance ?? undefined,
+    totalMinutes: p.totalMinutes ?? null,
+    minimumPerKm: p.minimumPerKm,
+    sourceApp: p.sourceApp,
+    rawText: p.rawText,
+  };
 }
 
 async function call(method: keyof Pick<typeof KmCertoNativeModule,
@@ -69,4 +79,21 @@ export function subscribeToOverlayUpdates(listener: (p: KmCertoOverlayPayload) =
   if (Platform.OS !== "android") return { remove: () => undefined };
   const sub = KmCertoNativeModule.addListener("KmCertoOverlayData", (p: KmCertoOverlayEventPayload) => listener(norm(p)));
   return { remove: () => sub.remove() };
+}
+
+// ─── Funções de Log (NOVAS) ───
+
+export async function getLogPath(): Promise<string> {
+  if (Platform.OS !== "android") return "N/A";
+  try { return String(await KmCertoNativeModule.getLogPath()); } catch { return "N/A"; }
+}
+
+export async function clearLog(): Promise<boolean> {
+  if (Platform.OS !== "android") return false;
+  try { return Boolean(await KmCertoNativeModule.clearLog()); } catch { return false; }
+}
+
+export async function readLog(): Promise<string> {
+  if (Platform.OS !== "android") return "Disponível apenas no Android";
+  try { return String(await KmCertoNativeModule.readLog()); } catch { return "Erro ao ler log"; }
 }
