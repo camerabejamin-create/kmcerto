@@ -1,0 +1,112 @@
+package expo.modules.kmcertonative
+
+import org.json.JSONObject
+import java.util.Locale
+import java.util.regex.Pattern
+
+/**
+ * Objeto responsável por processar os textos capturados da tela (Uber, 99, iFood, etc.)
+ * e extrair os valores de tarifa e distância para decidir se a oferta é viável.
+ * 
+ * Calibrado para os padrões:
+ * - Uber: "R$ 15,83" e "31 min (14.9 km)"
+ * - 99: "R$ 13,00" e "Distância total 7,1 km"
+ */
+object KmCertoOfferParser {
+
+    fun fromJsonPayload(payload: String?, minPerKm: Double): OfferDecisionData? {
+        if (payload.isNullOrBlank()) return null
+        return try {
+            val json = JSONObject(payload)
+            val fare = json.optDouble("totalFare", 0.0)
+            val dist = json.optDouble("distanceKm", 0.0)
+            val source = json.optString("sourceApp", "Teste")
+            createDecision(fare, dist, minPerKm, source, payload)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun parse(text: String, minPerKm: Double, sourcePkg: String): OfferDecisionData? {
+        if (text.isBlank()) return null
+
+        val sourceApp = KmCertoRuntime.sourceLabel(sourcePkg)
+        
+        // 1. Extrair Tarifa (R$ 15,83 ou R$13,00)
+        val fare = extractFare(text) ?: return null
+
+        // 2. Extrair Distância (14.9 km ou 7,1 km)
+        val distance = extractDistance(text) ?: return null
+
+        // 3. Criar a decisão
+        return createDecision(fare, distance, minPerKm, sourceApp, text)
+    }
+
+    private fun extractFare(text: String): Double? {
+        // Padrão robusto para R$ seguido de valor com vírgula ou ponto
+        val moneyPattern = Pattern.compile("""R\$\s*(\d{1,3}(?:\.\d{3})*[.,]\d{2})""")
+        val matcher = moneyPattern.matcher(text)
+        
+        if (matcher.find()) {
+            val valueStr = matcher.group(1)
+                ?.replace(".", "") // Remove separador de milhar
+                ?.replace(",", ".") // Converte vírgula decimal para ponto
+            return valueStr?.toDoubleOrNull()
+        }
+        return null
+    }
+
+    private fun extractDistance(text: String): Double? {
+        // Padrão 1: "Distância total 7,1 km" (Comum na 99)
+        val pattern99 = Pattern.compile("""Dist[âa]ncia\s+total\s+(\d+(?:[.,]\d+)?)\s*km""", Pattern.CASE_INSENSITIVE)
+        val matcher99 = pattern99.matcher(text)
+        if (matcher99.find()) {
+            return matcher99.group(1)?.replace(",", ".")?.toDoubleOrNull()
+        }
+
+        // Padrão 2: "(14.9 km)" ou "14.9 km" (Comum na Uber)
+        val patternUber = Pattern.compile("""\(?(\d+(?:[.,]\d+)?)\s*km\)?""", Pattern.CASE_INSENSITIVE)
+        val matcherUber = patternUber.matcher(text)
+        if (matcherUber.find()) {
+            return matcherUber.group(1)?.replace(",", ".")?.toDoubleOrNull()
+        }
+
+        // Padrão 3: Genérico para qualquer número seguido de km
+        val patternGeneric = Pattern.compile("""(\d+(?:[.,]\d+)?)\s*km""", Pattern.CASE_INSENSITIVE)
+        val matcherGeneric = patternGeneric.matcher(text)
+        if (matcherGeneric.find()) {
+            return matcherGeneric.group(1)?.replace(",", ".")?.toDoubleOrNull()
+        }
+
+        return null
+    }
+
+    private fun createDecision(
+        fare: Double, 
+        distance: Double, 
+        minPerKm: Double, 
+        sourceApp: String, 
+        rawText: String
+    ): OfferDecisionData {
+        val perKm = if (distance > 0) fare / distance else 0.0
+        
+        val isGood = perKm >= minPerKm
+        val status = if (isGood) "ACEITAR" else "REJEITAR"
+        val statusColor = if (isGood) "#4CAF50" else "#F44336"
+
+        return OfferDecisionData(
+            totalFare = fare,
+            totalFareLabel = String.format(Locale("pt", "BR"), "R$ %.2f", fare),
+            status = status,
+            statusColor = statusColor,
+            perKm = perKm,
+            perHour = null,
+            perMinute = null,
+            minimumPerKm = minPerKm,
+            sourceApp = sourceApp,
+            rawText = rawText,
+            distanceKm = distance,
+            totalMinutes = null
+        )
+    }
+}
