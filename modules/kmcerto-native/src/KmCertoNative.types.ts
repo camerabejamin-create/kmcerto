@@ -6,7 +6,7 @@ export type KmCertoOverlayEventPayload = {
   perKm: number;
   perHour: number | null;
   perMinute: number | null;
-  totalDistance: number;
+  totalDistance: number | null;
   totalMinutes: number | null;
   minimumPerKm: number;
   sourceApp: string;
