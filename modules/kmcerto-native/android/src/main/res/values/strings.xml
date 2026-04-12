@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="accessibility_service_description">KmCerto analisa ofertas de entrega automaticamente.</string>
-    <string name="kmcerto_accessibility_description">KmCerto monitora ofertas de corrida nos apps iFood, 99, Uber, inDrive e Lalamove para calcular automaticamente o valor por quilômetro. O serviço precisa ficar ativo em segundo plano para detectar novas corridas.</string>
+    <string name="accessibility_service_description">KmCerto analisa ofertas de entrega e corrida automaticamente.</string>
+    <string name="kmcerto_accessibility_description">O KmCerto lê as ofertas de corridas e entregas automaticamente para calcular o valor por km. Monitora iFood, 99, Uber, inDrive e Lalamove em segundo plano.</string>
 </resources>
